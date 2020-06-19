@@ -1,0 +1,266 @@
+syntax = "proto3";
+
+package ntx.v2t.engine;
+
+option go_package = "engine";
+option java_package = "cz.ntx.proto.v2t.engine";
+option csharp_namespace = "cz.ntx.proto.v2t.engine";
+
+message Event {
+
+  // point in time on the timeline (in ticks)
+  message Timestamp {
+    oneof value {
+      // default point in time
+      uint64 timestamp = 1;
+      // point in time used for recovery in case of failure (can be skip when recovery not implemented)
+      uint64 recovery = 2;
+    }
+  }
+
+  // transcribed text
+  message Label {
+    oneof label {
+
+      // recognized chunk of text (e.g. single word)
+      string item = 1;
+      // joins two items (e.g. string containing space character)
+      string plus = 2;
+      // an item that is not a speech
+      string noise = 3;
+    }
+  }
+
+  // audio input/output
+  message Audio {
+    // raw audio body
+    bytes body = 1;
+    // optional offset from stream start
+    uint64 offset = 5;
+    // optional raw audio body duration
+    uint64 duration = 6;
+  }
+
+  // aditional information abotu stream
+  message Meta {
+    message Confidence {
+      double value = 1;
+    }
+
+    oneof body {
+      Confidence confidence = 1;
+    }
+  }
+
+  oneof body {
+    Timestamp timestamp = 1;
+    Label label = 2;
+    Audio audio = 3;
+    Meta meta = 4;
+  }
+}
+
+message Events {
+
+  // list of events, may be empty
+  repeated Event events = 1;
+
+  // whole non final hypothesis (will be fully replaced by final hypothesis) when set to true
+  bool lookahead = 2;
+
+  // optional, for client-side processing
+  uint64 receivedAt = 3;
+
+  // optional, for parralel client-side processing
+  uint32 channelId = 4;
+}
+
+enum EngineModule {
+  MODULE_NONE = 0;
+  MODULE_VAD = 1;
+  MODULE_V2T = 5;
+  MODULE_PPC = 11;
+  MODULE_PNC = 15;
+}
+
+message Lexicon {
+
+  message UserItem {
+    // output symbol (required)
+    string sym = 1;
+    // pronunciation in phonetic alphabet (optional)
+    string pron = 2;
+    // grapheme (optional)
+    string graph = 3;
+    // symbol already exists in lexicon (returned by server)
+    bool foundInLex = 4;
+  }
+
+  message NoiseItem {
+    // output symbol
+    string sym = 1;
+    // pronunciation
+    string pron = 2;
+  }
+
+  message MainItem {
+    // output symbol
+    string sym = 1;
+    // pronunciation
+    string pron = 2;
+    // mount, equal to sym if blank
+    string mnt = 3;
+  }
+
+  message LexItem {
+    oneof item {
+      UserItem user = 1;
+      MainItem main = 2;
+      NoiseItem noise = 3;
+    }
+  }
+
+  // number 1 reserved
+  repeated LexItem items = 2;
+  // list of allowed phonemes (returned by server)
+  string alpha = 3;
+}
+
+message AudioFormat {
+
+  enum ChannelLayout {
+    AUDIO_CHANNEL_LAYOUT_NONE = 0;
+    AUDIO_CHANNEL_LAYOUT_MONO = 1;
+    AUDIO_CHANNEL_LAYOUT_STEREO = 2;
+  }
+
+  enum SampleFormat {
+    AUDIO_SAMPLE_FORMAT_NONE = 0;
+    AUDIO_SAMPLE_FORMAT_ALAW = 1;
+    AUDIO_SAMPLE_FORMAT_F32BE = 2;
+    AUDIO_SAMPLE_FORMAT_F32LE = 3;
+    AUDIO_SAMPLE_FORMAT_F64BE = 4;
+    AUDIO_SAMPLE_FORMAT_F64LE = 5;
+    AUDIO_SAMPLE_FORMAT_MULAW = 6;
+    AUDIO_SAMPLE_FORMAT_S16BE = 7;
+    AUDIO_SAMPLE_FORMAT_S16LE = 8;
+    AUDIO_SAMPLE_FORMAT_S24BE = 9;
+    AUDIO_SAMPLE_FORMAT_S24LE = 10;
+    AUDIO_SAMPLE_FORMAT_S32BE = 11;
+    AUDIO_SAMPLE_FORMAT_S32LE = 12;
+    AUDIO_SAMPLE_FORMAT_S8 = 13;
+    AUDIO_SAMPLE_FORMAT_U16BE = 14;
+    AUDIO_SAMPLE_FORMAT_U16LE = 15;
+    AUDIO_SAMPLE_FORMAT_U24BE = 16;
+    AUDIO_SAMPLE_FORMAT_U24LE = 17;
+    AUDIO_SAMPLE_FORMAT_U32BE = 18;
+    AUDIO_SAMPLE_FORMAT_U32LE = 19;
+    AUDIO_SAMPLE_FORMAT_U8 = 20;
+  }
+
+  enum SampleRate {
+    AUDIO_SAMPLE_RATE_NONE = 0;
+    AUDIO_SAMPLE_RATE_8000 = 1;
+    AUDIO_SAMPLE_RATE_16000 = 2;
+    AUDIO_SAMPLE_RATE_32000 = 3;
+    AUDIO_SAMPLE_RATE_48000 = 4;
+    AUDIO_SAMPLE_RATE_96000 = 5;
+    AUDIO_SAMPLE_RATE_11025 = 6;
+    AUDIO_SAMPLE_RATE_22050 = 7;
+    AUDIO_SAMPLE_RATE_44100 = 8;
+  }
+
+  // make best effort guess about what audio format is used
+  message AutoDetect {
+    // upper limit of bytes used to detect audio format automaticcaly, [32, INT_MAX]
+    uint32 probeSizeBytes = 1;
+  }
+
+  // raw data
+  message PCM {
+    SampleFormat sampleFormat = 1;
+    SampleRate sampleRate = 2;
+    ChannelLayout channelLayout = 3;
+  }
+
+  // detect audio format from provided audio header bytes
+  message Header {
+    bytes header = 1;
+  }
+
+  oneof formats {
+    AutoDetect auto = 1;
+    PCM pcm = 2;
+    Header header = 3;
+  }
+}
+
+message EngineContext {
+
+  // voice activity detection
+  message VADConfig {}
+
+  // punctuation config
+  message PNCConfig {}
+
+  // post-processing config
+  message PPCConfig {}
+
+  // voice to text
+  message V2TConfig {
+    // set to enable voice activity detection
+    VADConfig withVAD = 1;
+    // set to enable post-processing
+    PPCConfig withPPC = 3;
+    // modify used lexicon
+    Lexicon withLexicon = 4;
+    // set to enable automatic punctuation
+    PNCConfig withPNC = 5;
+  }
+
+  enum AudioChannel {
+    // downmix all channels to mono
+    AUDIO_CHANNEL_DOWNMIX = 0;
+    // select only left channel
+    AUDIO_CHANNEL_LEFT = 1;
+    // select only right channel
+    AUDIO_CHANNEL_RIGHT = 2;
+  }
+
+  AudioFormat audioFormat = 1;
+  AudioChannel audioChannel = 2;
+
+  oneof config {
+    VADConfig vad = 3;
+    V2TConfig v2t = 5;
+    PPCConfig ppc = 9;
+  }
+}
+
+message EngineContextStart {
+  EngineContext context = 1;
+}
+
+message EngineContextEnd {
+  string error = 1;
+}
+
+message EventsPush {
+  Events events = 1;
+}
+
+message EventsPull {
+}
+
+message EngineStream {
+  oneof payload {
+    EngineContextStart start = 1;
+    EventsPush push = 2;
+    EventsPull pull = 3;
+    EngineContextEnd end = 4;
+  }
+}
+
+service EngineService {
+  rpc StreamingRecognize (stream EngineStream) returns (stream EngineStream);
+}
