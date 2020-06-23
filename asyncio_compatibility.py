@@ -1,7 +1,9 @@
+# https://stackoverflow.com/a/55595696
 import sys, asyncio
 
 def run(aw):
     if sys.version_info >= (3, 7):
+        #pylint: disable=no-member
         return asyncio.run(aw)
 
     # Emulate asyncio.run() on older versions
