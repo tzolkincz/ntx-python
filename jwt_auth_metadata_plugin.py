@@ -1,5 +1,6 @@
 from grpc import AuthMetadataPlugin, AuthMetadataContext, AuthMetadataPluginCallback
 
+from threading import Thread
 import aiohttp
 import asyncio
 import json
@@ -54,8 +55,8 @@ class Token():
 
 
 class WaitableToken():
-    def __init__(self):
-        self.filled = asyncio.Event()
+    def __init__(self, loop):
+        self.filled = asyncio.Event(loop=loop)
         self.token = None
     
     def set(self, token: Token):
@@ -63,11 +64,12 @@ class WaitableToken():
         self.filled.set()
 
 
-class JwtAuthMetadataPlugin(AuthMetadataPlugin):
+class JwtAuthMetadataPlugin():
     def __init__(self, audience=AUDIENCE, username=USERNAME, password=PASSWORD, id=ID, label=LABEL):
         self.InitialAttemptCondition = AttemptCondition(_NUMBER_OF_ADDITIONAL_ATTEMPTS)
-        self._access_token = WaitableToken()
-        self.ntx_token = WaitableToken()
+        self._access_token = WaitableToken(None)
+        self.ntx_token = WaitableToken(None)
+        #self.loop = asyncio.get_event_loop()
         
         self.audience = audience
         self.username = username
@@ -141,22 +143,46 @@ class JwtAuthMetadataPlugin(AuthMetadataPlugin):
             self.keep_authorized(),
             self.keep_authenticated())
 
-    #    self._access_token = await self.attempt_repeatedly(self.obtain_access_token, 'accessToken')
-    #    self.ntx_token = await self.attempt_repeatedly(self.obtain_ntx_token, 'ntxToken')
+    def _thread_function(self, authenticator, loop):
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(authenticator.purvey())
 
+    def __enter__(self):
+        """For non-async code"""
+        self.loop = asyncio.new_event_loop()
+        self._access_token = WaitableToken(self.loop)
+        self.ntx_token = WaitableToken(self.loop)
+        self._thread = Thread(target=self._thread_function, args=(self, self.loop))
+        self._thread.setDaemon(True)
+        self._thread.start()
+        return UnderlyingMetadataPlugin(self)
 
-    def __call__(self, context: AuthMetadataContext, callback: AuthMetadataPluginCallback):
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        #self._thread.join()
         pass
 
-async def amain(machinery: JwtAuthMetadataPlugin):
-    await machinery.authenticated()
-    print(machinery._access_token.token.data)
-    await machinery.authorized()
-    print(machinery.ntx_token.token.data)
+
+class UnderlyingMetadataPlugin(AuthMetadataPlugin):
+    def __init__(self, authenticator: JwtAuthMetadataPlugin):
+        self.authenticator = authenticator
+
+    async def _wait(self):
+        await self.authenticator.authenticated()
+        print(self.authenticator._access_token.token.data)
+        await self.authenticator.authorized()
+        print(self.authenticator.ntx_token.token.data)
+
+    def wait(self):
+        asyncio.run_coroutine_threadsafe(self._wait(), self.authenticator.loop).result()
+
+    def __call__(self, context: AuthMetadataContext, callback: AuthMetadataPluginCallback):
+        self.wait()
+        callback(('Bearer', self.authenticator.ntx_token.token.data))
 
 def main():
     m = JwtAuthMetadataPlugin()
-    all_async = asyncio.wait({amain(m), m.purvey()}, return_when=asyncio.FIRST_COMPLETED)
+    u = UnderlyingMetadataPlugin(m)
+    all_async = asyncio.wait({u._wait(), m.purvey()}, return_when=asyncio.FIRST_COMPLETED)
     loop = asyncio.get_event_loop()
     loop.run_until_complete(all_async)
 
