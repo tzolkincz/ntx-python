@@ -20,12 +20,15 @@ import protobuf.engine_pb2_grpc as engine_pb2_grpc
 
 from jwt_auth_metadata_plugin import JwtAuthMetadataPlugin, UnderlyingMetadataPlugin
 
+from scipy.io.wavfile import read as read_wav
+#import numpy as np
+
 
 class NewtonEngine():
     def __init__(self, config, creds_plugin: UnderlyingMetadataPlugin):
         self.config = config
         self.creds_plugin = creds_plugin
-        self.finnished = Event()
+        self.finished = Event()
 
     def __enter__(self):
         ssl_cred = grpc.ssl_channel_credentials() # Default from Mozilla
@@ -58,23 +61,24 @@ class NewtonEngine():
             end=EngineContextEnd())
 
     @staticmethod
-    def _audio_chunk_to_event(data: bytes, offset=None, duration=None) -> EventsPush:
-        return EventsPush(
-            push=Events(
-                events=[Event(
-                    audio=Audio(
-                        body=data,
-                        offset=offset,
-                        duration=duration))],
-                    lookahead=False))
+    def _audio_chunk_to_engine_stream(data: bytes, offset=None, duration=None) -> EngineStream:
+        return EngineStream(
+            push=EventsPush(
+                events=Events(
+                    events=[Event(
+                        audio=Audio(
+                            body=data,
+                            offset=offset,
+                            duration=duration))],
+                        lookahead=False)))
 
     def _filter_pushes(self, stream: Iterator[EngineStream]) -> Iterator[EventsPush]:
         for tidbit in stream:
             kind = tidbit.WhichOneof('payload')
             if 'start' == kind:
-                self.finnished.clear()
+                self.finished.clear()
             elif 'end' == kind:
-                self.finnished.set()
+                self.finished.set()
             elif 'push' == kind:
                 yield tidbit.push
 
@@ -86,18 +90,30 @@ class NewtonEngine():
     def _filter_labels(labels: Iterator[Label]) -> Iterator[Label]:
         return (l for l in labels if l.WhichOneOf('label') in {'item', 'plus'}) # filter out noise labels
 
-    def send_audio_chunks(self, audio_chunks_provider: Iterator[bytes]):
-        self._provider = audio_chunks_provider
+    def send_audio_chunks(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[Label]:
+        #self._provider = audio_chunks_provider
         #self.completed_transription.clear()
         return map(NewtonEngine._filter_labels,
             map(NewtonEngine._event_to_label,
-                map(self._filter_pushes,
+                self._filter_pushes(
                     self.stub.StreamingRecognize(
                         chain(
-                            _start(),
-                            map(NewtonEngine._audio_chunk_to_event, self._provider),
-                            _end()),
+                            self._start(),
+                            map(NewtonEngine._audio_chunk_to_engine_stream, audio_chunks_provider),
+                            NewtonEngine._end()),
                         metadata=(('no-flow-control', 'true'),)))))
+
+
+def test_audio(path='ahoj-svete-8000-mono.wav'):
+    w = read_wav(path)
+    rate = w[0]
+    data = w[1]
+    position = 0
+    chunk_size = int(0.125 * rate)
+    while position != data.size:
+        chunk = data[position:(position+chunk_size)]
+        position = position + chunk.size
+        yield bytes(chunk)
 
 
 if __name__ == '__main__':
@@ -110,7 +126,7 @@ if __name__ == '__main__':
             'format': AudioFormat.AUDIO_SAMPLE_FORMAT_S16LE,
             'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO}
         with NewtonEngine(conf, auth_plugin) as engine:
-            #print(''.join(engine.send_audio_chunks())) #engine.send_audio_chunks()
-            #engine.finnished.wait()
+            print(''.join(engine.send_audio_chunks(test_audio())))
+            #engine.finished.wait()
             pass
         print("Done")
