@@ -177,7 +177,7 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
 
     def __call__(self, context: AuthMetadataContext, callback: AuthMetadataPluginCallback):
         self.wait()
-        callback(('Bearer', self.authenticator.ntx_token.token.data))
+        callback((('ntx-token', self.authenticator.ntx_token.token.data),), None)
 
 def main():
     m = JwtAuthMetadataPlugin()
