@@ -103,7 +103,7 @@ class NewtonEngine():
         #self.completed_transription.clear()
         return map(NewtonEngine._label_to_str,
             NewtonEngine._filter_labels(
-                chain(*map(NewtonEngine._push_to_labels,
+                chain(*map(NewtonEngine._push_to_labels, # TODO fix, Python yuck; it won't be lazy unlike Haskell's `join`
                     self._filter_pushes(
                         self.stub.StreamingRecognize(
                             chain(
