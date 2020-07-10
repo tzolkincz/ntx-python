@@ -145,6 +145,7 @@ class NewtonEngineWrapped():
         self.auth_plugin = self.plugin.__enter__()
         self.newton_engine = NewtonEngine(self.conf, self.auth_plugin)
         self.engine = self.newton_engine.__enter__()
+        self.auth_plugin.wait()
         return self
 
     def __exit__(self, exc_type, exc_value, tb):
