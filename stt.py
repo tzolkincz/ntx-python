@@ -1,5 +1,5 @@
-from __config__ import DOMAIN
-
+import logging, sys
+logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 from typing import Iterator, Any, Callable
 
 from threading import Event as ThreadEvent
@@ -20,8 +20,6 @@ import protobuf.engine_pb2_grpc as engine_pb2_grpc
 
 from jwt_auth_metadata_plugin import JwtAuthMetadataPlugin, UnderlyingMetadataPlugin
 
-from scipy.io.wavfile import read as read_wav
-#import numpy as np
 
 # Similar to Haskell's join :: Monad m => m (m a) -> m a
 # Lazy version of itertools.chain(*gen_of_gens)
@@ -136,10 +134,14 @@ class NewtonEngine():
 
 class NewtonEngineWrapped():
     def __init__(self, conf):
-        self.conf = conf
+        self.conf = {
+            'rate': AudioFormat.AUDIO_SAMPLE_RATE_8000,
+            'format': AudioFormat.AUDIO_SAMPLE_FORMAT_S16LE,
+            'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO,
+            **conf}
         
     def __enter__(self):
-        self.plugin = JwtAuthMetadataPlugin()
+        self.plugin = JwtAuthMetadataPlugin(self.conf['auth'])
         self.auth_plugin = self.plugin.__enter__()
         self.newton_engine = NewtonEngine(self.conf, self.auth_plugin)
         self.engine = self.newton_engine.__enter__()
@@ -154,6 +156,7 @@ class NewtonEngineWrapped():
             callback(response)
 
 
+from scipy.io.wavfile import read as read_wav
 def test_audio(path='ahoj-svete-8000-mono.wav'):
     w = read_wav(path)
     rate = w[0]
@@ -167,33 +170,22 @@ def test_audio(path='ahoj-svete-8000-mono.wav'):
 
 
 if __name__ == '__main__':
+    sys.argv = sys.argv[1:]
+    from __config__ import DOMAIN, AUDIENCE, USERNAME, PASSWORD, ID, LABEL
+    auth_conf = {
+            'audience': AUDIENCE,
+            'username': USERNAME,
+            'password': PASSWORD,
+            'id': ID,
+            'label': LABEL}
     conf = {
             'lookahead': False,
             'domain': DOMAIN,
-            'rate': AudioFormat.AUDIO_SAMPLE_RATE_8000,
-            'format': AudioFormat.AUDIO_SAMPLE_FORMAT_S16LE,
-            'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO}
+            'auth': auth_conf}
     engine = NewtonEngineWrapped(conf).__enter__()
-    engine.recognize(test_audio(), lambda txt: print(txt, flush=True, end=''))
-
-#if __name__ == '__main__':
-#    with JwtAuthMetadataPlugin() as auth_plugin:
-#        conf = {
-#            'domain': DOMAIN,
-#            'rate': AudioFormat.AUDIO_SAMPLE_RATE_8000,
-#            'format': AudioFormat.AUDIO_SAMPLE_FORMAT_S16LE,
-#            'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO}
-#        with NewtonEngine(conf, auth_plugin) as engine:
-#            #print(list(map(list,engine._send_audio_chunks_with_all_labels(test_audio()))))
-#            #for push in engine._send_audio_chunks_with_all_pushes(test_audio('kratsi_mono.wav')):
-#            #    print(push)
-#            #for labels in engine.send_audio_chunks(test_audio('kratsi_mono.wav')):
-#            #    print(map(list, labels))
-#
-#            #print(''.join(engine.send_audio_chunks(test_audio('kratsi_mono.wav'))))
-#
-#            for bla in engine.send_audio_chunks(test_audio('fuuuuuj.wav')):
-#                print(bla, end='')
-#            ##engine.finished.wait()
-#            #print(''.join(engine.send_audio_chunks(test_audio())))
-#            #engine.finished.wait()
+    try:
+        filename = sys.argv[0]
+    except IndexError:
+        filename = 'ahoj-svete-8000-mono.wav'
+    engine.recognize(test_audio(filename), lambda txt: print(txt, flush=True, end=''))
+    print()

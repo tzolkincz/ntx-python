@@ -1,3 +1,8 @@
+import logging, sys
+logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+from typing import Callable, Dict
+
+
 from grpc import AuthMetadataPlugin, AuthMetadataContext, AuthMetadataPluginCallback
 
 from threading import Thread
@@ -5,16 +10,6 @@ import aiohttp
 import asyncio
 import json
 from time import time
-
-from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
-
-_DEFAULT_HEADERS = {'Content-Type': 'application/json'}
-_ADEPT_FOR_ANOTHER_TRY = {401, 403}
-_NUMBER_OF_ADDITIONAL_ATTEMPTS = 2
-_ATTEMPT_DELAY = 3
-_PAUSE_AFTER_FAILURE = 60
-
-from typing import Callable, Dict
 
 
 class CheckError(Exception):
@@ -65,37 +60,38 @@ class WaitableToken():
 
 
 class JwtAuthMetadataPlugin():
-    def __init__(self, audience=AUDIENCE, username=USERNAME, password=PASSWORD, id=ID, label=LABEL):
-        self.InitialAttemptCondition = AttemptCondition(_NUMBER_OF_ADDITIONAL_ATTEMPTS)
+    def __init__(self, conf):
+        self.conf = {
+            '_default_headers': {'Content-Type': 'application/json'},
+            '_adept_for_another_try': {401, 403},
+            '_additional_attempts': 2,
+            '_attempt_delay': 3,
+            '_pause_after_failure': 60,
+            **conf}
+        self.InitialAttemptCondition = AttemptCondition(self.conf['_additional_attempts'])
         self._access_token = WaitableToken(None)
         self.ntx_token = WaitableToken(None)
         #self.loop = asyncio.get_event_loop()
-        
-        self.audience = audience
-        self.username = username
-        self.password = password
-        self.id = id
-        self.label = label
 
     async def obtain(self, attempt: AttemptCondition, endpoint='/', body={}, headers={}):
         check(attempt.unexhausted())
         async with aiohttp.ClientSession() as session:
             request_body = json.dumps(body).encode()
-            request_headers = {**headers, **_DEFAULT_HEADERS}
-            async with session.post(f'{self.audience}{endpoint}', data=request_body, headers=request_headers) as response:
-                if response.status in _ADEPT_FOR_ANOTHER_TRY:
+            request_headers = {**headers, **self.conf['_default_headers']}
+            async with session.post(f'{self.conf["audience"]}{endpoint}', data=request_body, headers=request_headers) as response:
+                if response.status in self.conf['_adept_for_another_try']:
                     raise attempt.another()
                 check(response.status == 200)
                 return await response.text()
 
     async def obtain_access_token(self, attempt):
         return await self.obtain(attempt, '/login/access-token',
-            {'username': self.username, 'password': self.password})
+            {k:v for k,v in self.conf.items() if k in {'username', 'password'}})
 
     async def obtain_ntx_token(self, attempt):
         check(self._access_token is not None)
         return await self.obtain(attempt, '/store/ntx-token',
-            {'id': self.id, 'label': self.label},
+            {k:v for k,v in self.conf.items() if k in {'id', 'label'}},
             {'ntx-token': self._access_token.token.data})
 
     async def attempt_repeatedly(self, obtainer):
@@ -106,9 +102,9 @@ class JwtAuthMetadataPlugin():
                     return json.loads(await obtainer(attempt))
                 except AttemptCondition as another_attempt:
                     attempt = another_attempt
-                    await asyncio.sleep(_ATTEMPT_DELAY)
-        except (CheckError, TypeError, json.decoder.JSONDecodeError, KeyError):
-            # TODO log
+                    await asyncio.sleep(self.conf['_attempt_delay'])
+        except (CheckError, TypeError, json.decoder.JSONDecodeError, KeyError) as e:
+            logging.info('An attempt to obtain failed because: %s.', e)
             raise CheckError
 
     async def authenticated(self):
@@ -128,15 +124,15 @@ class JwtAuthMetadataPlugin():
     async def keep_authenticated(self):
         while True:
             await self.keep_fresh(self._access_token, self.obtain_access_token, 'accessToken')
-            # TODO log
-            await asyncio.sleep(_PAUSE_AFTER_FAILURE)
+            logging.warning('Keeping authenticated failed, trying again after %s s.', self.conf['_pause_after_failure'])
+            await asyncio.sleep(self.conf['_pause_after_failure']) # TODO exponential backoff
 
     async def keep_authorized(self):
         while True:
             await self.authenticated()
             await self.keep_fresh(self.ntx_token, self.obtain_ntx_token, 'ntxToken')
-            # TODO log
-            await asyncio.sleep(_PAUSE_AFTER_FAILURE)
+            logging.warning('Keeping authorized failed, trying again after %s s.', self.conf['_pause_after_failure'])
+            await asyncio.sleep(self.conf['_pause_after_failure']) # TODO exponential backoff
 
     async def purvey(self):
         await asyncio.gather(
@@ -168,9 +164,9 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
 
     async def _wait(self):
         await self.authenticator.authenticated()
-        print(self.authenticator._access_token.token.data)
+        logging.debug('Access token: %s', self.authenticator._access_token.token.data)
         await self.authenticator.authorized()
-        print(self.authenticator.ntx_token.token.data)
+        logging.debug('Ntx token: %s', self.authenticator.ntx_token.token.data)
 
     def wait(self):
         asyncio.run_coroutine_threadsafe(self._wait(), self.authenticator.loop).result()
@@ -180,7 +176,13 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
         callback((('ntx-token', self.authenticator.ntx_token.token.data),), None)
 
 def main():
-    m = JwtAuthMetadataPlugin()
+    from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
+    m = JwtAuthMetadataPlugin({
+            'audience': AUDIENCE,
+            'username': USERNAME,
+            'password': PASSWORD,
+            'id': ID,
+            'label': LABEL})
     u = UnderlyingMetadataPlugin(m)
     all_async = asyncio.wait({u._wait(), m.purvey()}, return_when=asyncio.FIRST_COMPLETED)
     loop = asyncio.get_event_loop()
