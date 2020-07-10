@@ -1,6 +1,6 @@
 from __config__ import DOMAIN
 
-from typing import Iterator
+from typing import Iterator, Any
 
 from threading import Event as ThreadEvent
 from itertools import chain
@@ -22,6 +22,12 @@ from jwt_auth_metadata_plugin import JwtAuthMetadataPlugin, UnderlyingMetadataPl
 
 from scipy.io.wavfile import read as read_wav
 #import numpy as np
+
+# Similar to Haskell's join :: Monad m => m (m a) -> m a
+# Lazy version of itertools.chain(*gen_of_gens)
+def join(gen_of_gens: Iterator[Iterator[Any]]) -> Iterator[Any]:
+     for gen in gen_of_gens:
+         yield from gen
 
 
 class NewtonEngine():
@@ -98,12 +104,10 @@ class NewtonEngine():
         elif 'plus' == kind:
             return label.plus
 
-    def send_audio_chunks(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[Label]:
-        #self._provider = audio_chunks_provider
-        #self.completed_transription.clear()
+    def send_audio_chunks(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[str]:
         return map(NewtonEngine._label_to_str,
             NewtonEngine._filter_labels(
-                chain(*map(NewtonEngine._push_to_labels, # TODO fix, Python yuck; it won't be lazy unlike Haskell's `join`
+                join(map(NewtonEngine._push_to_labels,
                     self._filter_pushes(
                         self.stub.StreamingRecognize(
                             chain(
@@ -134,4 +138,6 @@ if __name__ == '__main__':
             'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO}
         with NewtonEngine(conf, auth_plugin) as engine:
             print(''.join(engine.send_audio_chunks(test_audio())))
+            ##engine.finished.wait()
+            #print(''.join(engine.send_audio_chunks(test_audio())))
             #engine.finished.wait()
