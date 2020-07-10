@@ -1,6 +1,6 @@
 from __config__ import DOMAIN
 
-from typing import Iterator, Any
+from typing import Iterator, Any, Callable
 
 from threading import Event as ThreadEvent
 from itertools import chain
@@ -66,8 +66,7 @@ class NewtonEngine():
         yield EngineStream(
             end=EngineContextEnd())
 
-    @staticmethod
-    def _audio_chunk_to_engine_stream(data: bytes, offset=None, duration=None) -> EngineStream:
+    def _audio_chunk_to_engine_stream(self, data: bytes, offset=None, duration=None) -> EngineStream:
         return EngineStream(
             push=EventsPush(
                 events=Events(
@@ -76,7 +75,7 @@ class NewtonEngine():
                             body=data,
                             offset=offset,
                             duration=duration))],
-                        lookahead=False)))
+                        lookahead=self.config['lookahead'])))
 
     def _filter_pushes(self, stream: Iterator[EngineStream]) -> Iterator[EventsPush]:
         for tidbit in stream:
@@ -112,9 +111,47 @@ class NewtonEngine():
                         self.stub.StreamingRecognize(
                             chain(
                                 self._start(),
-                                map(NewtonEngine._audio_chunk_to_engine_stream, audio_chunks_provider),
+                                map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
                                 NewtonEngine._end()),
                             metadata=(('no-flow-control', 'true'),)))))))
+
+    def _send_audio_chunks_with_all_labels(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[Label]:
+        return map(NewtonEngine._push_to_labels,
+                    self._filter_pushes(
+                        self.stub.StreamingRecognize(
+                            chain(
+                                self._start(),
+                                map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
+                                NewtonEngine._end()),
+                            metadata=(('no-flow-control', 'true'),))))
+
+    def _send_audio_chunks_with_all_pushes(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[Label]:
+        return self.stub.StreamingRecognize(
+                            chain(
+                                self._start(),
+                                map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
+                                NewtonEngine._end()),
+                            metadata=(('no-flow-control', 'true'),))
+
+
+class NewtonEngineWrapped():
+    def __init__(self, conf):
+        self.conf = conf
+        
+    def __enter__(self):
+        self.plugin = JwtAuthMetadataPlugin()
+        self.auth_plugin = self.plugin.__enter__()
+        self.newton_engine = NewtonEngine(self.conf, self.auth_plugin)
+        self.engine = self.newton_engine.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, tb):
+        self.newton_engine.__exit__(exc_type, exc_value, tb)
+        self.plugin.__exit__(exc_type, exc_value, tb)
+
+    def recognize(self, feeder: Iterator[bytes], callback: Callable[[str], None]) -> None:
+        for response in self.newton_engine.send_audio_chunks(feeder):
+            callback(response)
 
 
 def test_audio(path='ahoj-svete-8000-mono.wav'):
@@ -130,14 +167,33 @@ def test_audio(path='ahoj-svete-8000-mono.wav'):
 
 
 if __name__ == '__main__':
-    with JwtAuthMetadataPlugin() as auth_plugin:
-        conf = {
+    conf = {
+            'lookahead': False,
             'domain': DOMAIN,
             'rate': AudioFormat.AUDIO_SAMPLE_RATE_8000,
             'format': AudioFormat.AUDIO_SAMPLE_FORMAT_S16LE,
             'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO}
-        with NewtonEngine(conf, auth_plugin) as engine:
-            print(''.join(engine.send_audio_chunks(test_audio())))
-            ##engine.finished.wait()
-            #print(''.join(engine.send_audio_chunks(test_audio())))
-            #engine.finished.wait()
+    engine = NewtonEngineWrapped(conf).__enter__()
+    engine.recognize(test_audio(), lambda txt: print(txt, flush=True, end=''))
+
+#if __name__ == '__main__':
+#    with JwtAuthMetadataPlugin() as auth_plugin:
+#        conf = {
+#            'domain': DOMAIN,
+#            'rate': AudioFormat.AUDIO_SAMPLE_RATE_8000,
+#            'format': AudioFormat.AUDIO_SAMPLE_FORMAT_S16LE,
+#            'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO}
+#        with NewtonEngine(conf, auth_plugin) as engine:
+#            #print(list(map(list,engine._send_audio_chunks_with_all_labels(test_audio()))))
+#            #for push in engine._send_audio_chunks_with_all_pushes(test_audio('kratsi_mono.wav')):
+#            #    print(push)
+#            #for labels in engine.send_audio_chunks(test_audio('kratsi_mono.wav')):
+#            #    print(map(list, labels))
+#
+#            #print(''.join(engine.send_audio_chunks(test_audio('kratsi_mono.wav'))))
+#
+#            for bla in engine.send_audio_chunks(test_audio('fuuuuuj.wav')):
+#                print(bla, end='')
+#            ##engine.finished.wait()
+#            #print(''.join(engine.send_audio_chunks(test_audio())))
+#            #engine.finished.wait()
