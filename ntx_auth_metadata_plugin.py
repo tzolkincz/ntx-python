@@ -60,7 +60,7 @@ class WaitableToken():
         self.filled.set()
 
 
-class JwtAuthMetadataPlugin():
+class NewtonAuthMetadataPlugin():
     def __init__(self, conf):
         self.conf = {
             '_default_headers': {'Content-Type': 'application/json'},
@@ -171,7 +171,7 @@ class JwtAuthMetadataPlugin():
 
 
 class UnderlyingMetadataPlugin(AuthMetadataPlugin):
-    def __init__(self, authenticator: JwtAuthMetadataPlugin):
+    def __init__(self, authenticator: NewtonAuthMetadataPlugin):
         self.authenticator = authenticator
 
     async def _wait(self):
@@ -189,7 +189,7 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
 
 def main_with_async():
     from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
-    m = JwtAuthMetadataPlugin({
+    m = NewtonAuthMetadataPlugin({
             'audience': AUDIENCE,
             'username': USERNAME,
             'password': PASSWORD,
@@ -202,7 +202,8 @@ def main_with_async():
 
 def main():
     from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
-    with JwtAuthMetadataPlugin({
+    with NewtonAuthMetadataPlugin({
+            'daemon': False,
             'audience': AUDIENCE,
             'username': USERNAME,
             'password': PASSWORD,

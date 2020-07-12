@@ -18,7 +18,7 @@ Meta = Event.Meta; Audio = Event.Audio; Label = Event.Label; Timestamp = Event.T
 import sys, os; sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'protobuf')) # Python yuck
 import protobuf.engine_pb2_grpc as engine_pb2_grpc
 
-from jwt_auth_metadata_plugin import JwtAuthMetadataPlugin, UnderlyingMetadataPlugin
+from ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin
 
 
 # Similar to Haskell's join :: Monad m => m (m a) -> m a
@@ -28,7 +28,7 @@ def join(gen_of_gens: Iterator[Iterator[Any]]) -> Iterator[Any]:
         yield from gen
 
 
-class NewtonEngine():
+class UnderlyingNewtonEngine():
     def __init__(self, config, creds_plugin: UnderlyingMetadataPlugin):
         self.config = config
         self.creds_plugin = creds_plugin
@@ -102,19 +102,19 @@ class NewtonEngine():
             return label.plus
 
     def send_audio_chunks(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[str]:
-        return map(NewtonEngine._label_to_str,
-            NewtonEngine._filter_labels(
-                join(map(NewtonEngine._push_to_labels,
+        return map(UnderlyingNewtonEngine._label_to_str,
+            UnderlyingNewtonEngine._filter_labels(
+                join(map(UnderlyingNewtonEngine._push_to_labels,
                     self._filter_pushes(
                         self.stub.StreamingRecognize(
                             chain(
                                 self._start(),
                                 map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
-                                NewtonEngine._end()),
+                                UnderlyingNewtonEngine._end()),
                             metadata=(('no-flow-control', 'true'),)))))))
 
 
-class NewtonEngineWrapped():
+class NewtonEngine():
     def __init__(self, conf):
         self.conf = {
             'rate': AudioFormat.AUDIO_SAMPLE_RATE_8000,
@@ -130,8 +130,8 @@ class NewtonEngineWrapped():
         return responder
 
     def _create(self):
-        with JwtAuthMetadataPlugin(self.conf['auth']) as self._auth_plugin:
-            with NewtonEngine(self.conf, self._auth_plugin) as self._engine:
+        with NewtonAuthMetadataPlugin(self.conf['auth']) as self._auth_plugin:
+            with UnderlyingNewtonEngine(self.conf, self._auth_plugin) as self._engine:
                 self._auth_plugin.wait() # Obtaining access
                 while True:
                     yield self._engine.send_audio_chunks((yield))
@@ -176,7 +176,7 @@ if __name__ == '__main__':
             'lookahead': False,
             'domain': DOMAIN,
             'auth': auth_conf}
-    with NewtonEngineWrapped(conf) as engine:
+    with NewtonEngine(conf) as engine:
         try:
             filename = sys.argv[0]
         except IndexError:
