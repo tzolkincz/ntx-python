@@ -143,9 +143,9 @@ class NewtonEngineWrapped():
         next(self._stream) # Priming, initializing `with` objects
         
     def recognize(self, feeder: Iterator[bytes], callback: Callable[[str], None]) -> None:
-        responsder = self._stream.send(feeder)
+        responder = self._stream.send(feeder)
         next(self._stream) # Advancing back to arguments
-        for response in responsder:
+        for response in responder:
             callback(response)
 
     def _create(self):
