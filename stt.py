@@ -113,24 +113,6 @@ class NewtonEngine():
                                 NewtonEngine._end()),
                             metadata=(('no-flow-control', 'true'),)))))))
 
-    def _send_audio_chunks_with_all_labels(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[Label]:
-        return map(NewtonEngine._push_to_labels,
-                    self._filter_pushes(
-                        self.stub.StreamingRecognize(
-                            chain(
-                                self._start(),
-                                map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
-                                NewtonEngine._end()),
-                            metadata=(('no-flow-control', 'true'),))))
-
-    def _send_audio_chunks_with_all_pushes(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[Label]:
-        return self.stub.StreamingRecognize(
-                            chain(
-                                self._start(),
-                                map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
-                                NewtonEngine._end()),
-                            metadata=(('no-flow-control', 'true'),))
-
 
 class NewtonEngineWrapped():
     def __init__(self, conf):
