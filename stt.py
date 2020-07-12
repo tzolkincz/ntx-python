@@ -139,23 +139,21 @@ class NewtonEngineWrapped():
             'format': AudioFormat.AUDIO_SAMPLE_FORMAT_S16LE,
             'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO,
             **conf}
+        self._stream = self._create()
+        next(self._stream) # Priming, initializing `with` objects
         
-    def __enter__(self):
-        self.plugin = JwtAuthMetadataPlugin(self.conf['auth'])
-        self.auth_plugin = self.plugin.__enter__()
-        self.newton_engine = NewtonEngine(self.conf, self.auth_plugin)
-        self.engine = self.newton_engine.__enter__()
-        self.auth_plugin.wait()
-        return self
-
-    def __exit__(self, exc_type, exc_value, tb):
-        self.newton_engine.__exit__(exc_type, exc_value, tb)
-        self.plugin.__exit__(exc_type, exc_value, tb)
-
     def recognize(self, feeder: Iterator[bytes], callback: Callable[[str], None]) -> None:
-        for response in self.newton_engine.send_audio_chunks(feeder):
+        responsder = self._stream.send(feeder)
+        next(self._stream) # Advancing back to arguments
+        for response in responsder:
             callback(response)
 
+    def _create(self):
+        with JwtAuthMetadataPlugin(self.conf['auth']) as self._auth_plugin:
+            with NewtonEngine(self.conf, self._auth_plugin) as self._engine:
+                self._auth_plugin.wait() # Obtaining access
+                while True:
+                    yield self._engine.send_audio_chunks((yield))
 
 from scipy.io.wavfile import read as read_wav
 def test_audio(path='ahoj-svete-8000-mono.wav'):
@@ -183,7 +181,7 @@ if __name__ == '__main__':
             'lookahead': False,
             'domain': DOMAIN,
             'auth': auth_conf}
-    engine = NewtonEngineWrapped(conf).__enter__()
+    engine = NewtonEngineWrapped(conf)
     try:
         filename = sys.argv[0]
     except IndexError:
