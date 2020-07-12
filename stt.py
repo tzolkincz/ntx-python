@@ -24,8 +24,8 @@ from jwt_auth_metadata_plugin import JwtAuthMetadataPlugin, UnderlyingMetadataPl
 # Similar to Haskell's join :: Monad m => m (m a) -> m a
 # Lazy version of itertools.chain(*gen_of_gens)
 def join(gen_of_gens: Iterator[Iterator[Any]]) -> Iterator[Any]:
-     for gen in gen_of_gens:
-         yield from gen
+    for gen in gen_of_gens:
+        yield from gen
 
 
 class NewtonEngine():
@@ -141,12 +141,11 @@ class NewtonEngineWrapped():
             **conf}
         self._stream = self._create()
         next(self._stream) # Priming, initializing `with` objects
-        
-    def recognize(self, feeder: Iterator[bytes], callback: Callable[[str], None]) -> None:
+
+    def recognize(self, feeder: Iterator[bytes]) -> Iterator[str]:
         responder = self._stream.send(feeder)
         next(self._stream) # Advancing back to arguments
-        for response in responder:
-            callback(response)
+        return responder
 
     def _create(self):
         with JwtAuthMetadataPlugin(self.conf['auth']) as self._auth_plugin:
@@ -154,6 +153,19 @@ class NewtonEngineWrapped():
                 self._auth_plugin.wait() # Obtaining access
                 while True:
                     yield self._engine.send_audio_chunks((yield))
+
+    def stop(self):
+        self._stream.close()
+
+    def __del__(self):
+        self.stop()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, tb):
+        self.stop()
+
 
 from scipy.io.wavfile import read as read_wav
 def test_audio(path='ahoj-svete-8000-mono.wav'):
@@ -172,6 +184,7 @@ if __name__ == '__main__':
     sys.argv = sys.argv[1:]
     from __config__ import DOMAIN, AUDIENCE, USERNAME, PASSWORD, ID, LABEL
     auth_conf = {
+            'daemon': False, # set to True if you're not using `with NewtonEngineWrapped(conf) ...`
             'audience': AUDIENCE,
             'username': USERNAME,
             'password': PASSWORD,
@@ -181,10 +194,11 @@ if __name__ == '__main__':
             'lookahead': False,
             'domain': DOMAIN,
             'auth': auth_conf}
-    engine = NewtonEngineWrapped(conf)
-    try:
-        filename = sys.argv[0]
-    except IndexError:
-        filename = 'ahoj-svete-8000-mono.wav'
-    engine.recognize(test_audio(filename), lambda txt: print(txt, flush=True, end=''))
-    print()
+    with NewtonEngineWrapped(conf) as engine:
+        try:
+            filename = sys.argv[0]
+        except IndexError:
+            filename = 'ahoj-svete-8000-mono.wav'
+        for txt in engine.recognize(test_audio(filename)):
+            print(txt, flush=True, end='')
+        print()

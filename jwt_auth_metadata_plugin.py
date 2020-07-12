@@ -1,5 +1,6 @@
 import logging, sys
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 from typing import Callable, Dict
 
 
@@ -71,7 +72,6 @@ class JwtAuthMetadataPlugin():
         self.InitialAttemptCondition = AttemptCondition(self.conf['_additional_attempts'])
         self._access_token = WaitableToken(None)
         self.ntx_token = WaitableToken(None)
-        #self.loop = asyncio.get_event_loop()
 
     async def obtain(self, attempt: AttemptCondition, endpoint='/', body={}, headers={}):
         check(attempt.unexhausted())
@@ -136,26 +136,38 @@ class JwtAuthMetadataPlugin():
 
     async def purvey(self):
         await asyncio.gather(
-            self.keep_authorized(),
-            self.keep_authenticated())
+            self.keep_authenticated(),
+            self.keep_authorized())
 
-    def _thread_function(self, authenticator, loop):
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(authenticator.purvey())
+    async def _stopper(self):
+        await self._stop_signal.wait()
+
+    async def stop(self):
+        self._stop_signal.set()
+
+    async def _stoppable_purvey(self):
+        await asyncio.wait({self.purvey(), self._stopper()},
+            return_when=asyncio.FIRST_COMPLETED)
+
+    def _thread_function(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self._stoppable_purvey())
+        self.loop.close()
 
     def __enter__(self):
         """For non-async code"""
         self.loop = asyncio.new_event_loop()
+        self._stop_signal = asyncio.Event(loop=self.loop)
         self._access_token = WaitableToken(self.loop)
         self.ntx_token = WaitableToken(self.loop)
-        self._thread = Thread(target=self._thread_function, args=(self, self.loop))
-        self._thread.setDaemon(True)
+        self._thread = Thread(target=self._thread_function, daemon=self.conf['daemon'])
         self._thread.start()
         return UnderlyingMetadataPlugin(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        #self._thread.join()
-        pass
+        asyncio.run_coroutine_threadsafe(self.stop(), self.loop)
+        if not self.conf['daemon']:
+            self._thread.join()
 
 
 class UnderlyingMetadataPlugin(AuthMetadataPlugin):
@@ -175,7 +187,7 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
         self.wait()
         callback((('ntx-token', self.authenticator.ntx_token.token.data),), None)
 
-def main():
+def main_with_async():
     from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
     m = JwtAuthMetadataPlugin({
             'audience': AUDIENCE,
@@ -188,5 +200,16 @@ def main():
     loop = asyncio.get_event_loop()
     loop.run_until_complete(all_async)
 
+def main():
+    from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
+    with JwtAuthMetadataPlugin({
+            'audience': AUDIENCE,
+            'username': USERNAME,
+            'password': PASSWORD,
+            'id': ID,
+            'label': LABEL}) as u:
+        u.wait()
+
 if __name__=='__main__':
+    #main_with_async()
     main()
