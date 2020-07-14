@@ -1,6 +1,6 @@
 import logging, sys
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
-from typing import Iterator, Any, Callable
+from typing import Iterator, Any, Callable, Tuple
 
 from threading import Event as ThreadEvent
 from itertools import chain
@@ -91,13 +91,21 @@ class UnderlyingNewtonEngine():
             elif 'push' == kind:
                 yield tidbit.push
 
-    @staticmethod
-    def _push_to_labels(push: EventsPush) -> Iterator[Label]:
+    def _push_to_decorated_labels(self, push: EventsPush) -> Iterator[Tuple[Label, Meta, Timestamp]]:
+        for event in push.events.events:
+            kind = event.WhichOneof('body')
+            if 'meta' == kind and event.meta.WhichOneof('body') == 'confidence':
+                self._last_meta_event_with_confidence = event.meta
+            elif 'timestamp' == kind:
+                self._last_timestamp = event.timestamp
+            elif 'label' == kind:
+                yield event.label, self._last_meta_event_with_confidence, self._last_timestamp
+
         return (ev.label for ev in push.events.events if ev.WhichOneof('body') == 'label')
 
     @staticmethod
-    def _filter_labels(labels: Iterator[Label]) -> Iterator[Label]:
-        return (l for l in labels if l.WhichOneof('label') in {'item', 'plus'}) # filter out noise labels
+    def _filter_decorated_labels(labels: Iterator[Tuple[Label, Meta, Timestamp]]) -> Iterator[Tuple[Label, Meta, Timestamp]]:
+        return (l for l in labels if l[0].WhichOneof('label') in {'item', 'plus'}) # filter out noise labels
 
     @staticmethod
     def _label_to_str(label: Label) -> str:
@@ -108,16 +116,19 @@ class UnderlyingNewtonEngine():
             return label.plus
 
     def send_audio_chunks(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[str]:
+        self._last_meta_event_with_confidence = None
+        self._last_timestamp = None
         return map(UnderlyingNewtonEngine._label_to_str,
-            UnderlyingNewtonEngine._filter_labels(
-                join(map(UnderlyingNewtonEngine._push_to_labels,
-                    self._filter_pushes(
-                        self.stub.StreamingRecognize(
-                            chain(
-                                self._start(),
-                                map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
-                                UnderlyingNewtonEngine._end()),
-                            metadata=(('no-flow-control', 'true'),)))))))
+            map(lambda t: t[0],
+                UnderlyingNewtonEngine._filter_decorated_labels(
+                    join(map(self._push_to_decorated_labels,
+                        self._filter_pushes(
+                            self.stub.StreamingRecognize(
+                                chain(
+                                    self._start(),
+                                    map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
+                                    UnderlyingNewtonEngine._end()),
+                                metadata=(('no-flow-control', 'true'),))))))))
 
 
 class NewtonEngine():
