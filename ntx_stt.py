@@ -107,20 +107,10 @@ class UnderlyingNewtonEngine():
     def _filter_decorated_labels(labels: Iterator[Tuple[Label, Meta, Timestamp]]) -> Iterator[Tuple[Label, Meta, Timestamp]]:
         return (l for l in labels if l[0].WhichOneof('label') in {'item', 'plus'}) # filter out noise labels
 
-    @staticmethod
-    def _label_to_str(label: Label) -> str:
-        kind = label.WhichOneof('label')
-        if 'item' == kind:
-            return label.item
-        elif 'plus' == kind:
-            return label.plus
-
-    def send_audio_chunks(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[str]:
+    def send_audio_chunks(self, audio_chunks_provider: Iterator[bytes]) -> Iterator[Tuple[Label, Meta, Timestamp]]:
         self._last_meta_event_with_confidence = None
         self._last_timestamp = None
-        return map(UnderlyingNewtonEngine._label_to_str,
-            map(lambda t: t[0],
-                UnderlyingNewtonEngine._filter_decorated_labels(
+        return UnderlyingNewtonEngine._filter_decorated_labels(
                     join(map(self._push_to_decorated_labels,
                         self._filter_pushes(
                             self.stub.StreamingRecognize(
@@ -128,7 +118,19 @@ class UnderlyingNewtonEngine():
                                     self._start(),
                                     map(self._audio_chunk_to_engine_stream, audio_chunks_provider),
                                     UnderlyingNewtonEngine._end()),
-                                metadata=(('no-flow-control', 'true'),))))))))
+                                metadata=(('no-flow-control', 'true'),))))))
+
+
+def label_to_str(label: Label) -> str:
+    kind = label.WhichOneof('label')
+    if 'item' == kind:
+        return label.item
+    elif 'plus' == kind:
+        return label.plus
+
+
+def to_strings(decorated_labels: Iterator[Tuple[Label, Meta, Timestamp]]) -> Iterator[str]:
+    return map(lambda t: label_to_str(t[0]), decorated_labels)
 
 
 class NewtonEngine():
@@ -201,6 +203,6 @@ if __name__ == '__main__':
             filename = sys.argv[0]
         except IndexError:
             filename = 'ahoj-svete-8000-mono.wav'
-        for txt in engine.recognize(test_audio(filename)):
+        for txt in to_strings(engine.recognize(test_audio(filename))):
             print(txt, flush=True, end='')
         print()
