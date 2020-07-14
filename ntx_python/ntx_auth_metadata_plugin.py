@@ -1,9 +1,3 @@
-import logging, sys
-logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
-logging.getLogger('asyncio').setLevel(logging.CRITICAL)
-from typing import Callable, Dict
-
-
 from grpc import AuthMetadataPlugin, AuthMetadataContext, AuthMetadataPluginCallback
 
 from threading import Thread
@@ -11,6 +5,10 @@ import aiohttp
 import asyncio
 import json
 from time import time
+
+import logging, sys
+logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 
 
 class CheckError(Exception):
@@ -34,7 +32,7 @@ class AttemptCondition(Exception):
         return AttemptCondition(self.remaining_number - 1)
 
 
-class Token():
+class Token:
     VALID_PART = 0.75
 
     def __init__(self, data, key):
@@ -50,7 +48,7 @@ class Token():
         await asyncio.sleep(stale_timestamp - int(time()))
 
 
-class WaitableToken():
+class WaitableToken:
     def __init__(self, loop):
         self.filled = asyncio.Event(loop=loop)
         self.token = None
@@ -60,7 +58,7 @@ class WaitableToken():
         self.filled.set()
 
 
-class NewtonAuthMetadataPlugin():
+class NewtonAuthMetadataPlugin:
     def __init__(self, conf):
         self.conf = {
             '_default_headers': {'Content-Type': 'application/json'},
@@ -174,14 +172,14 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
     def __init__(self, authenticator: NewtonAuthMetadataPlugin):
         self.authenticator = authenticator
 
-    async def _wait(self):
+    async def async_wait(self):
         await self.authenticator.authenticated()
         logging.debug('Access token: %s', self.authenticator._access_token.token.data)
         await self.authenticator.authorized()
         logging.debug('Ntx token: %s', self.authenticator.ntx_token.token.data)
 
     def wait(self):
-        asyncio.run_coroutine_threadsafe(self._wait(), self.authenticator.loop).result()
+        asyncio.run_coroutine_threadsafe(self.async_wait(), self.authenticator.loop).result()
 
     def __call__(self, context: AuthMetadataContext, callback: AuthMetadataPluginCallback):
         self.wait()
@@ -203,32 +201,3 @@ class BasicNewtonMetadataPlugin(AuthMetadataPlugin):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
-
-
-def main_with_async():
-    from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
-    m = NewtonAuthMetadataPlugin({
-            'audience': AUDIENCE,
-            'username': USERNAME,
-            'password': PASSWORD,
-            'id': ID,
-            'label': LABEL})
-    u = UnderlyingMetadataPlugin(m)
-    all_async = asyncio.wait({u._wait(), m.purvey()}, return_when=asyncio.FIRST_COMPLETED)
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(all_async)
-
-def main():
-    from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
-    with NewtonAuthMetadataPlugin({
-            'daemon': False,
-            'audience': AUDIENCE,
-            'username': USERNAME,
-            'password': PASSWORD,
-            'id': ID,
-            'label': LABEL}) as u:
-        u.wait()
-
-if __name__=='__main__':
-    #main_with_async()
-    main()

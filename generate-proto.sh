@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OUT_DIR=./protobuf
+OUT_DIR=./ntx_protobuf
 
 #python -m pip install grpcio
 #python -m pip install grpcio-tools

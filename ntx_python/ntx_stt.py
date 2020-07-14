@@ -1,24 +1,23 @@
-import logging, sys
-logging.basicConfig(stream=sys.stderr, level=logging.INFO)
-from typing import Iterator, Any, Callable, Tuple
-
+from typing import Iterator, Any, Tuple
 from threading import Event as ThreadEvent
 from itertools import chain
 
 import grpc
-import protobuf.engine_pb2 as engine_pb2
-from protobuf.engine_pb2 import EngineStream, EngineContext, EngineContextStart, EngineContextEnd, EventsPush, EventsPull, Events, Event, Lexicon, AudioFormat
+from ntx_protobuf.engine_pb2 import EngineStream, EngineContext, EngineContextStart, EngineContextEnd, EventsPush, Events, Event, Lexicon, AudioFormat
+import ntx_protobuf.engine_pb2_grpc as engine_pb2_grpc
+
+from ntx_python.ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin, BasicNewtonMetadataPlugin
+
+import logging, sys
+logging.basicConfig(stream=sys.stderr, level=logging.INFO)
+
+
 #Python is a little different – the Python compiler generates a module with a static descriptor of each message type in your .proto, which is then used with a metaclass to create the necessary Python data access class at runtime.
 #pylint: disable=no-member
 ChannelLayout = AudioFormat.ChannelLayout; SampleFormat = AudioFormat.SampleFormat; SampleRate = AudioFormat.SampleRate; AutoDetect = AudioFormat.AutoDetect; PCM = AudioFormat.PCM; Header = AudioFormat.Header
 V2TConfig = EngineContext.V2TConfig; VADConfig = EngineContext.VADConfig; PNCConfig = EngineContext.PNCConfig; PPCConfig = EngineContext.PPCConfig; AudioChannel = EngineContext.AudioChannel
 LexItem = Lexicon.LexItem; MainItem = Lexicon.MainItem; NoiseItem = Lexicon.NoiseItem; UserItem = Lexicon.UserItem
 Meta = Event.Meta; Audio = Event.Audio; Label = Event.Label; Timestamp = Event.Timestamp
-
-import sys, os; sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'protobuf')) # Python yuck
-import protobuf.engine_pb2_grpc as engine_pb2_grpc
-
-from ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin, BasicNewtonMetadataPlugin
 
 
 # Similar to Haskell's join :: Monad m => m (m a) -> m a
@@ -28,14 +27,14 @@ def join(gen_of_gens: Iterator[Iterator[Any]]) -> Iterator[Any]:
         yield from gen
 
 
-class UnderlyingNewtonEngine():
+class UnderlyingNewtonEngine:
     def __init__(self, config, creds_plugin: UnderlyingMetadataPlugin):
         self.config = config
         self.creds_plugin = creds_plugin
         self.finished = ThreadEvent()
 
     def __enter__(self):
-        ssl_cred = grpc.ssl_channel_credentials() # Default from Mozilla
+        ssl_cred = grpc.ssl_channel_credentials()  # Default from Mozilla
         call_cred = grpc.metadata_call_credentials(self.creds_plugin)
         composed_creds = grpc.composite_channel_credentials(ssl_cred, call_cred)
         self._channel = grpc.secure_channel(f'{self.config["domain"]}:443', composed_creds)
@@ -133,7 +132,7 @@ def to_strings(decorated_labels: Iterator[Tuple[Label, Meta, Timestamp]]) -> Ite
     return map(lambda t: label_to_str(t[0]), decorated_labels)
 
 
-class NewtonEngine():
+class NewtonEngine:
     def __init__(self, conf):
         self.conf = {
             'rate': AudioFormat.AUDIO_SAMPLE_RATE_8000,
@@ -141,17 +140,19 @@ class NewtonEngine():
             'channels': AudioFormat.AUDIO_CHANNEL_LAYOUT_MONO,
             **conf}
         self._stream = self._create()
-        next(self._stream) # Priming, initializing `with` objects
+        next(self._stream)  # Priming, initializing `with` objects
 
     def recognize(self, feeder: Iterator[bytes]) -> Iterator[str]:
         responder = self._stream.send(feeder)
-        next(self._stream) # Advancing back to arguments
+        next(self._stream)  # Advancing back to arguments
         return responder
 
     def _create(self):
-        with (NewtonAuthMetadataPlugin(self.conf['auth']) if isinstance(self.conf['auth'], dict) else BasicNewtonMetadataPlugin(self.conf['auth'])) as self._auth_plugin:
+        with (NewtonAuthMetadataPlugin(self.conf['auth'])
+                if isinstance(self.conf['auth'], dict)
+                else BasicNewtonMetadataPlugin(self.conf['auth'])) as self._auth_plugin:
             with UnderlyingNewtonEngine(self.conf, self._auth_plugin) as self._engine:
-                self._auth_plugin.wait() # Obtaining access
+                self._auth_plugin.wait()  # Obtaining access
                 while True:
                     yield self._engine.send_audio_chunks((yield))
 
@@ -166,43 +167,3 @@ class NewtonEngine():
 
     def __exit__(self, exc_type, exc_value, tb):
         self.stop()
-
-
-from scipy.io.wavfile import read as read_wav
-def test_audio(path='ahoj-svete-8000-mono.wav'):
-    w = read_wav(path)
-    rate = w[0]
-    data = w[1]
-    position = 0
-    chunk_size = int(0.125 * rate)
-    while position != data.size:
-        chunk = data[position:(position+chunk_size)]
-        position = position + chunk.size
-        yield bytes(chunk)
-
-
-if __name__ == '__main__':
-    sys.argv = sys.argv[1:]
-    from __config__ import DOMAIN, AUDIENCE, USERNAME, PASSWORD, ID, LABEL, TOKEN
-    auth_conf = {
-            'daemon': False, # set to True if you're not using `with NewtonEngineWrapped(conf) ...`
-            'audience': AUDIENCE,
-            'username': USERNAME,
-            'password': PASSWORD,
-            'id': ID,
-            'label': LABEL}
-    conf = {
-            'pnc': False,
-            'ppc': True,
-            'lookahead': False,
-            'domain': DOMAIN,
-            'auth': TOKEN # static token #auth_conf
-    }
-    with NewtonEngine(conf) as engine:
-        try:
-            filename = sys.argv[0]
-        except IndexError:
-            filename = 'ahoj-svete-8000-mono.wav'
-        for txt in to_strings(engine.recognize(test_audio(filename))):
-            print(txt, flush=True, end='')
-        print()
