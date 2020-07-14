@@ -3,8 +3,8 @@ from threading import Event as ThreadEvent
 from itertools import chain
 
 import grpc
-from ntx_protobuf.engine_pb2 import EngineStream, EngineContext, EngineContextStart, EngineContextEnd, EventsPush, Events, Event, Lexicon, AudioFormat
-import ntx_protobuf.engine_pb2_grpc as engine_pb2_grpc
+from ntx_python.ntx_protobuf.engine_pb2 import EngineStream, EngineContext, EngineContextStart, EngineContextEnd, EventsPush, Events, Event, Lexicon, AudioFormat
+from ntx_python.ntx_protobuf.engine_pb2_grpc import EngineServiceStub
 
 from ntx_python.ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin, BasicNewtonMetadataPlugin
 
@@ -38,7 +38,7 @@ class UnderlyingNewtonEngine:
         call_cred = grpc.metadata_call_credentials(self.creds_plugin)
         composed_creds = grpc.composite_channel_credentials(ssl_cred, call_cred)
         self._channel = grpc.secure_channel(f'{self.config["domain"]}:443', composed_creds)
-        self.stub = engine_pb2_grpc.EngineServiceStub(self._channel)
+        self.stub = EngineServiceStub(self._channel)
         return self
 
     def __exit__(self, exc_type, exc_value, tb):
