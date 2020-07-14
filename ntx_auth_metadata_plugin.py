@@ -187,6 +187,24 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
         self.wait()
         callback((('ntx-token', self.authenticator.ntx_token.token.data),), None)
 
+
+class BasicNewtonMetadataPlugin(AuthMetadataPlugin):
+    def __init__(self, token: str):
+        self.token = token
+
+    def __call__(self, context: AuthMetadataContext, callback: AuthMetadataPluginCallback):
+        callback((('ntx-token', self.token),), None)
+
+    def wait(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
 def main_with_async():
     from __config__ import AUDIENCE, USERNAME, PASSWORD, ID, LABEL
     m = NewtonAuthMetadataPlugin({

@@ -18,7 +18,7 @@ Meta = Event.Meta; Audio = Event.Audio; Label = Event.Label; Timestamp = Event.T
 import sys, os; sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'protobuf')) # Python yuck
 import protobuf.engine_pb2_grpc as engine_pb2_grpc
 
-from ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin
+from ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin, BasicNewtonMetadataPlugin
 
 
 # Similar to Haskell's join :: Monad m => m (m a) -> m a
@@ -46,12 +46,18 @@ class UnderlyingNewtonEngine():
         self._channel.close()
 
     def _start(self):
+        if self.config['pnc'] and self.config['ppc']:
+            v2t = V2TConfig(withPNC=PNCConfig(), withPPC=PPCConfig())
+        elif self.config['pnc']:
+            v2t = V2TConfig(withPNC=PNCConfig())
+        elif self.config['ppc']:
+            v2t = V2TConfig(withPPC=PPCConfig())
+        else:
+            v2t = V2TConfig()
         yield EngineStream(
             start=EngineContextStart(
                 context=EngineContext(
-                    v2t=V2TConfig(
-                        withPNC=PNCConfig(),
-                        withPPC=PPCConfig()),
+                    v2t=v2t,
                     audioChannel=EngineContext.AUDIO_CHANNEL_DOWNMIX,
                     audioFormat=AudioFormat(
                         pcm=PCM(
@@ -130,7 +136,7 @@ class NewtonEngine():
         return responder
 
     def _create(self):
-        with NewtonAuthMetadataPlugin(self.conf['auth']) as self._auth_plugin:
+        with (NewtonAuthMetadataPlugin(self.conf['auth']) if isinstance(self.conf['auth'], dict) else BasicNewtonMetadataPlugin(self.conf['auth'])) as self._auth_plugin:
             with UnderlyingNewtonEngine(self.conf, self._auth_plugin) as self._engine:
                 self._auth_plugin.wait() # Obtaining access
                 while True:
@@ -164,7 +170,7 @@ def test_audio(path='ahoj-svete-8000-mono.wav'):
 
 if __name__ == '__main__':
     sys.argv = sys.argv[1:]
-    from __config__ import DOMAIN, AUDIENCE, USERNAME, PASSWORD, ID, LABEL
+    from __config__ import DOMAIN, AUDIENCE, USERNAME, PASSWORD, ID, LABEL, TOKEN
     auth_conf = {
             'daemon': False, # set to True if you're not using `with NewtonEngineWrapped(conf) ...`
             'audience': AUDIENCE,
@@ -173,9 +179,12 @@ if __name__ == '__main__':
             'id': ID,
             'label': LABEL}
     conf = {
+            'pnc': False,
+            'ppc': True,
             'lookahead': False,
             'domain': DOMAIN,
-            'auth': auth_conf}
+            'auth': TOKEN # static token #auth_conf
+    }
     with NewtonEngine(conf) as engine:
         try:
             filename = sys.argv[0]
