@@ -4,8 +4,8 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="example-pkg-YOUR-USERNAME-HERE", # Replace with your own username
-    version="1.0.0",
+    name="ntx-python",
+    version="1.0.3",
     author="Goheeca",
     author_email="goheeca@gmail.com",
     description="Python library for speech to text using NanoTrix cloud",
