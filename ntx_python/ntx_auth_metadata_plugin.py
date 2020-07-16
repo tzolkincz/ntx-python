@@ -6,8 +6,8 @@ import asyncio
 import json
 from time import time
 
-import logging, sys
-logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+import logging
+logger = logging.getLogger('ntx_python')
 logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 
 
@@ -102,7 +102,7 @@ class NewtonAuthMetadataPlugin:
                     attempt = another_attempt
                     await asyncio.sleep(self.conf['_attempt_delay'])
         except (CheckError, TypeError, json.decoder.JSONDecodeError, KeyError) as e:
-            logging.info('An attempt to obtain failed because: %s.', e)
+            logger.info('An attempt to obtain failed because: %s.', e)
             raise CheckError
 
     async def authenticated(self):
@@ -122,14 +122,14 @@ class NewtonAuthMetadataPlugin:
     async def keep_authenticated(self):
         while True:
             await self.keep_fresh(self._access_token, self.obtain_access_token, 'accessToken')
-            logging.warning('Keeping authenticated failed, trying again after %s s.', self.conf['_pause_after_failure'])
+            logger.warning('Keeping authenticated failed, trying again after %s s.', self.conf['_pause_after_failure'])
             await asyncio.sleep(self.conf['_pause_after_failure']) # TODO exponential backoff
 
     async def keep_authorized(self):
         while True:
             await self.authenticated()
             await self.keep_fresh(self.ntx_token, self.obtain_ntx_token, 'ntxToken')
-            logging.warning('Keeping authorized failed, trying again after %s s.', self.conf['_pause_after_failure'])
+            logger.warning('Keeping authorized failed, trying again after %s s.', self.conf['_pause_after_failure'])
             await asyncio.sleep(self.conf['_pause_after_failure']) # TODO exponential backoff
 
     async def purvey(self):
@@ -174,9 +174,9 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
 
     async def async_wait(self):
         await self.authenticator.authenticated()
-        logging.debug('Access token: %s', self.authenticator._access_token.token.data)
+        logger.debug('Access token: %s', self.authenticator._access_token.token.data)
         await self.authenticator.authorized()
-        logging.debug('Ntx token: %s', self.authenticator.ntx_token.token.data)
+        logger.debug('Ntx token: %s', self.authenticator.ntx_token.token.data)
 
     def wait(self):
         asyncio.run_coroutine_threadsafe(self.async_wait(), self.authenticator.loop).result()

@@ -8,9 +8,6 @@ from ntx_python.ntx_protobuf.engine_pb2_grpc import EngineServiceStub
 
 from ntx_python.ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin, BasicNewtonMetadataPlugin
 
-import logging, sys
-logging.basicConfig(stream=sys.stderr, level=logging.INFO)
-
 
 #Python is a little different – the Python compiler generates a module with a static descriptor of each message type in your .proto, which is then used with a metaclass to create the necessary Python data access class at runtime.
 #pylint: disable=no-member
@@ -95,7 +92,7 @@ class UnderlyingNewtonEngine:
             kind = event.WhichOneof('body')
             if 'meta' == kind and event.meta.WhichOneof('body') == 'confidence':
                 self._last_meta_event_with_confidence = event.meta
-            elif 'timestamp' == kind:
+            elif 'timestamp' == kind and event.timestamp.WhichOneof('value') == 'timestamp':
                 self._last_timestamp = event.timestamp
             elif 'label' == kind:
                 yield event.label, self._last_meta_event_with_confidence, self._last_timestamp

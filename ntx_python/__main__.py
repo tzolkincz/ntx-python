@@ -1,6 +1,8 @@
 from ntx_python.ntx_stt import NewtonEngine, to_strings
 from scipy.io.wavfile import read as read_wav
-import sys
+import logging, sys
+logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+logging.getLogger('ntx_python').setLevel(logging.INFO)
 
 
 def test_audio(path='ahoj-svete-8000-mono.wav'):
@@ -30,7 +32,7 @@ if __name__ == '__main__':
         'ppc': True,
         'lookahead': False,
         'domain': DOMAIN,
-        'auth': TOKEN  # static token #auth_conf
+        'auth': auth_conf
     }
     with NewtonEngine(conf) as engine:
         for txt in to_strings(engine.recognize(test_audio(sys.argv[0]))):
