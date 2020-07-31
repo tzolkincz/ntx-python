@@ -1,4 +1,4 @@
-grpcio
-aiohttp
-scipy # test
+grpcio~=1.30.0
+aiohttp~=3.6.2
+scipy~=1.5.1 # test
 #grpcio-tools # protobuf generator

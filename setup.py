@@ -20,7 +20,7 @@ setuptools.setup(
     ],
     python_requires='>=3.6',
     install_requires=[
-        'grpcio',
-        'aiohttp'
+        'grpcio~=1.30.0',
+        'aiohttp~=3.6.2'
     ]
 )
