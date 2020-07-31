@@ -1,4 +1,4 @@
 grpcio
 aiohttp
-#grpcio-tools
-#scipy # test
+scipy # test
+#grpcio-tools # protobuf generator
