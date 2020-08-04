@@ -1,5 +1,6 @@
-from ntx_python.ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin
+from ntx_python.ntx_auth_metadata_plugin import NewtonAuthMetadataPlugin, UnderlyingMetadataPlugin, FatalCondition
 import asyncio
+import sys
 
 
 def main_with_async():
@@ -11,9 +12,12 @@ def main_with_async():
         'id': ID,
         'label': LABEL})
     u = UnderlyingMetadataPlugin(m)
-    all_async = asyncio.wait({u.async_wait(), m.purvey()}, return_when=asyncio.FIRST_COMPLETED)
+    async def all_async():
+        for done in (await asyncio.wait({u.async_wait(), m.purvey()},
+                                        return_when=asyncio.FIRST_COMPLETED))[0]:
+            done.result()  # Reraise exceptions
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(all_async)
+    loop.run_until_complete(all_async())
 
 
 def main():
@@ -30,5 +34,8 @@ def main():
 
 
 if __name__=='__main__':
-    #main_with_async()
-    main()
+    try:
+        #main_with_async()
+        main()
+    except FatalCondition:
+        sys.exit(-1)

@@ -11,6 +11,10 @@ logger = logging.getLogger('ntx_python')
 logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 
 
+class FatalCondition(Exception):
+    pass
+
+
 class CheckError(Exception):
     pass
 
@@ -62,6 +66,7 @@ class NewtonAuthMetadataPlugin:
     def __init__(self, conf):
         self.conf = {
             '_default_headers': {'Content-Type': 'application/json'},
+            '_fatal_response': {404},
             '_adept_for_another_try': {401, 403},
             '_additional_attempts': 2,
             '_attempt_delay': 3,
@@ -70,6 +75,7 @@ class NewtonAuthMetadataPlugin:
         self.InitialAttemptCondition = AttemptCondition(self.conf['_additional_attempts'])
         self._access_token = WaitableToken(None)
         self.ntx_token = WaitableToken(None)
+        self.fatal = asyncio.Future()
 
     async def obtain(self, attempt: AttemptCondition, endpoint='/', body={}, headers={}):
         check(attempt.unexhausted())
@@ -79,6 +85,8 @@ class NewtonAuthMetadataPlugin:
             async with session.post(f'{self.conf["audience"]}{endpoint}', data=request_body, headers=request_headers) as response:
                 if response.status in self.conf['_adept_for_another_try']:
                     raise attempt.another()
+                if response.status in self.conf['_fatal_response']:
+                    raise FatalCondition
                 check(response.status == 200)
                 return await response.text()
 
@@ -133,9 +141,13 @@ class NewtonAuthMetadataPlugin:
             await asyncio.sleep(self.conf['_pause_after_failure']) # TODO exponential backoff
 
     async def purvey(self):
-        await asyncio.gather(
-            self.keep_authenticated(),
-            self.keep_authorized())
+        try:
+            await asyncio.gather(
+                self.keep_authenticated(),
+                self.keep_authorized())
+        except FatalCondition as e:
+            self.fatal.set_exception(e)
+            await asyncio.Event().wait()  # Sleep forever
 
     async def _stopper(self):
         await self._stop_signal.wait()
@@ -145,7 +157,7 @@ class NewtonAuthMetadataPlugin:
 
     async def _stoppable_purvey(self):
         await asyncio.wait({self.purvey(), self._stopper()},
-            return_when=asyncio.FIRST_COMPLETED)
+                           return_when=asyncio.FIRST_COMPLETED)
 
     def _thread_function(self):
         asyncio.set_event_loop(self.loop)
@@ -158,6 +170,7 @@ class NewtonAuthMetadataPlugin:
         self._stop_signal = asyncio.Event(loop=self.loop)
         self._access_token = WaitableToken(self.loop)
         self.ntx_token = WaitableToken(self.loop)
+        self.fatal = asyncio.Future(loop=self.loop)
         self._thread = Thread(target=self._thread_function, daemon=self.conf['daemon'])
         self._thread.start()
         return UnderlyingMetadataPlugin(self)
@@ -172,11 +185,16 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
     def __init__(self, authenticator: NewtonAuthMetadataPlugin):
         self.authenticator = authenticator
 
-    async def async_wait(self):
+    async def _async_wait(self):
         await self.authenticator.authenticated()
         logger.debug('Access token: %s', self.authenticator._access_token.token.data)
         await self.authenticator.authorized()
         logger.debug('Ntx token: %s', self.authenticator.ntx_token.token.data)
+
+    async def async_wait(self):
+        await asyncio.gather(
+            self._async_wait(),
+            self.authenticator.fatal)
 
     def wait(self):
         asyncio.run_coroutine_threadsafe(self.async_wait(), self.authenticator.loop).result()
