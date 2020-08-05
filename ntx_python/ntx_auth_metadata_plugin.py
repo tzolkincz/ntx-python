@@ -11,6 +11,11 @@ logger = logging.getLogger('ntx_python')
 logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 
 
+async def wait_with_reraising(*args, **kwargs):
+    for done in (await asyncio.wait(*args, **kwargs))[0]:
+        done.result()  # Reraise exceptions
+
+
 class FatalCondition(Exception):
     pass
 
@@ -192,9 +197,8 @@ class UnderlyingMetadataPlugin(AuthMetadataPlugin):
         logger.debug('Ntx token: %s', self.authenticator.ntx_token.token.data)
 
     async def async_wait(self):
-        await asyncio.gather(
-            self._async_wait(),
-            self.authenticator.fatal)
+        await wait_with_reraising({self._async_wait(), self.authenticator.fatal},
+            return_when=asyncio.FIRST_COMPLETED)
 
     def wait(self):
         asyncio.run_coroutine_threadsafe(self.async_wait(), self.authenticator.loop).result()
