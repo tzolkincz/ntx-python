@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="ntx-python",
-    version="1.1.4",
+    version="1.1.5",
     author="Goheeca",
     author_email="goheeca@gmail.com",
     description="Python library for speech to text using NanoTrix cloud",
@@ -20,7 +20,7 @@ setuptools.setup(
     ],
     python_requires='>=3.6',
     install_requires=[
-        'grpcio~=1.30.0',
-        'aiohttp~=3.6.2'
+        'grpcio~=1.51.1',
+        'aiohttp~=3.8.2'
     ]
 )
